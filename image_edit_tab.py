@@ -1,7 +1,6 @@
 """
 图像编辑 - Forge Neo
 """
-
 import os
 import sys
 import traceback
@@ -13,12 +12,10 @@ import time
 import subprocess
 from pathlib import Path
 from typing import List, Tuple
-
 import gradio as gr
 import numpy as np
 import torch
 from PIL import Image
-
 from modules import images, shared, processing, devices, sd_models, scripts, paths
 from modules.processing import StableDiffusionProcessingTxt2Img, process_images
 from modules.shared import opts
@@ -53,11 +50,10 @@ if hasattr(shared.cmd_opts, 'lora_dir') and shared.cmd_opts.lora_dir:
     LORA_PATH = Path(shared.cmd_opts.lora_dir)
 else:
     LORA_PATH = Path(paths.models_path) / "Lora"
-    if not LORA_PATH.exists():
-        alt_path = Path(paths.models_path) / "lora"
-        if alt_path.exists():
-            LORA_PATH = alt_path
-
+if not LORA_PATH.exists():
+    alt_path = Path(paths.models_path) / "lora"
+    if alt_path.exists():
+        LORA_PATH = alt_path
 LORA_PATH.mkdir(parents=True, exist_ok=True)
 
 # ==================== LoRA 模型列表获取 ====================
@@ -65,20 +61,20 @@ def get_lora_choices():
     try:
         if not LORA_PATH.exists():
             LORA_PATH.mkdir(parents=True, exist_ok=True)
-            return [("无", "")]
+            return [("无", " ")]
         lora_files = list(LORA_PATH.glob("*.safetensors"))
         lora_files.extend(LORA_PATH.glob("*.ckpt"))
         lora_files.extend(LORA_PATH.rglob("*.pt"))
         lora_files.extend(LORA_PATH.rglob("*.bin"))
-        choices = [("无", "")]
+        choices = [("无", " ")]
         for f in sorted(lora_files):
             rel_path = f.relative_to(LORA_PATH)
-            display_name = str(rel_path.with_suffix('')) 
+            display_name = str(rel_path.with_suffix(''))
             choices.append((display_name, str(f)))
         return choices
     except Exception as e:
         print(f"获取LoRA模型列表时出错: {e}")
-        return [("无", "")]
+        return [("无", " ")]
 
 def get_lora_names():
     try:
@@ -151,7 +147,6 @@ def force_load_model():
         print(f"[Image Edit] 目标模型: {checkpoint_name}")
         
         from modules import sd_models
-        
         if hasattr(sd_models, 'model_data'):
             if hasattr(sd_models.model_data, 'loaded_model'):
                 sd_models.model_data.loaded_model = None
@@ -179,9 +174,7 @@ def force_load_model():
             dynamic_args.online_lora = lora_fp16
             
         processing.need_global_unload = True
-        
         sd_model, reloaded = sd_models.forge_model_reload()
-        
         if sd_model is None:
             print("[Image Edit] ⚠️ forge_model_reload 返回空，尝试使用原生 load_model 兜底...")
             if hasattr(sd_models, 'load_model'):
@@ -196,22 +189,19 @@ def force_load_model():
         model_name = getattr(sd_model, 'sd_checkpoint_info', None)
         model_name = model_name.model_name if model_name else checkpoint_name
         return f"成功加载模型: {model_name}"
-        
     except Exception as e:
         error_msg = f"❌ 模型加载失败: {str(e)}\n{traceback.format_exc()}"
         print(error_msg)
         return error_msg
-    
+
 def unload_model() -> str:
     if shared.sd_model is None:
         return "模型已经卸载，无需重复操作"
     try:
-        # 清除参考图缓存
         if hasattr(shared.sd_model, 'clear_references'):
             shared.sd_model.clear_references()
             
         from modules import sd_models
-        
         if hasattr(sd_models, 'unload_model_weights'):
             sd_models.unload_model_weights()
         else:
@@ -222,21 +212,17 @@ def unload_model() -> str:
                 sd_models.model_data.loaded_model = None
             if hasattr(sd_models.model_data, 'current_checkpoint'):
                 sd_models.model_data.current_checkpoint = None
-                
         if hasattr(sd_models, 'checkpoints_loaded'):
             sd_models.checkpoints_loaded.clear()
             
         processing.need_global_unload = True
-        
-        # 释放显存
         devices.torch_gc()
-        
         print("[Image Edit] 模型已卸载")
         return "模型已卸载"
     except Exception as e:
         print(f"[Image Edit] ❌ 卸载失败: {e}")
         return f"❌ 卸载失败: {str(e)}"
-    
+
 def get_current_model_name() -> str:
     if shared.sd_model and not shared.sd_model.__class__.__name__.startswith('Fake'):
         if hasattr(shared.sd_model, 'sd_checkpoint_info'):
@@ -301,26 +287,21 @@ def generate_with_references(
     lora2_weight: float,
     lora3_weight: float,
     num_images: int,
-    progress=gr.Progress(), 
+    progress=gr.Progress(),
 ) -> Tuple[List[Image.Image], str]:
-
     start_time = time.time()
     
-    # ---------- 校验部分 ----------
     if not prompt.strip():
         return [], "提示词不能为空"
-
     if shared.sd_model is None or shared.sd_model.__class__.__name__.startswith('Fake'):
         return [], "模型未加载。请先点击「加载模型」按钮。"
-
     if not hasattr(shared.sd_model, 'encode_first_stage'):
         return [], "当前模型不支持图像编辑功能。请使用 Flux-Kontext / Qwen-Image-Edit 等模型。"
-
+        
     references = extract_images_from_uploads(img1, img2, img3)
     if not references:
         return [], "请至少上传一张参考图"
-
-    # ---------- LoRA 加载 ----------
+        
     lora_prompt = ""
     if lora1_path and lora1_path != "无":
         lora_name = os.path.splitext(os.path.basename(lora1_path))[0]
@@ -331,11 +312,11 @@ def generate_with_references(
     if lora3_path and lora3_path != "无":
         lora_name3 = os.path.splitext(os.path.basename(lora3_path))[0]
         lora_prompt += f" <lora:{lora_name3}:{lora3_weight}>"
+        
     if lora_prompt:
         prompt = f"{prompt} {lora_prompt}".strip()
         print(f"[Image Edit] 已加载 LoRA: {lora_prompt}")
-
-    # ---------- 构建处理对象 ----------
+        
     p = StableDiffusionProcessingTxt2Img(
         sd_model=shared.sd_model,
         outpath_samples=opts.outdir_txt2img_samples or opts.outdir_samples or "",
@@ -356,30 +337,25 @@ def generate_with_references(
         do_not_save_samples=False,
         do_not_save_grid=False,
     )
-
     reset_references(p)
     encode_reference_images(p, references)
-
-    # ========== 使用线程执行生成，主线程轮询更新进度条 ==========
-
+    
     result_queue = queue.Queue()
     error_queue = queue.Queue()
-
+    
     def run_generation():
         try:
             processed = process_images(p)
             result_queue.put(processed)
         except Exception as e:
             error_queue.put(str(e))
-
+            
     thread = threading.Thread(target=run_generation)
     thread.start()
-
-    # 初始化进度条
+    
     total_steps = steps
     progress(0, desc="开始生成...")
     last_step = -1
-
     while thread.is_alive():
         current_step = shared.state.sampling_step
         if current_step != last_step:
@@ -389,24 +365,21 @@ def generate_with_references(
             else:
                 progress(0.5, desc=f"步骤 {current_step}")
         time.sleep(0.3)
-
-    # 检查错误队列
+        
     if not error_queue.empty():
         error_msg = error_queue.get()
         if "NaN" in error_msg:
             error_msg += "\n\n提示：检测到 NaN。请检查采样器与调度器类型"
         return [], error_msg
-
+        
     if result_queue.empty():
         return [], "⚠️ 生成完成但未返回结果"
-
+        
     processed = result_queue.get()
     if not processed or not processed.images:
         return [], "生成失败或未生成图像"
-
     progress(1.0, desc="生成完成！")
-
-    # ---------- 组装参数信息 ----------
+    
     param_str = format_parameters(
         prompt, negative_prompt, width, height, steps, cfg_scale,
         sampler_name, scheduler_name, seed,
@@ -415,8 +388,7 @@ def generate_with_references(
         len(references),
         num_images
     )
-
-    # ---- 耗时统计 ----
+    
     elapsed = time.time() - start_time
     if elapsed < 60:
         time_str = f"{elapsed:.1f} 秒"
@@ -425,13 +397,11 @@ def generate_with_references(
         seconds = int(elapsed % 60)
         time_str = f"{minutes} 分 {seconds} 秒"
     param_str += f"\n耗时: {time_str}"
-    # -----------------------
-
+    
     reset_references(p)
     return processed.images, f"成功生成 {len(processed.images)} 张图像\n\n{param_str}"
 
 def create_ui():
-    # 获取采样器选项
     if WEBUI_SAMPLERS_AVAILABLE:
         try:
             sampler_choices = [(sampler.name, sampler.name) for sampler in sd_samplers.visible_samplers()]
@@ -450,7 +420,6 @@ def create_ui():
             ("DPM++ 2M", "DPM++ 2M")
         ]
 
-    # 获取调度器选项
     if WEBUI_SCHEDULERS_AVAILABLE:
         try:
             scheduler_choices = [(scheduler.label, scheduler.name) for scheduler in sd_schedulers.schedulers]
@@ -474,20 +443,21 @@ def create_ui():
             ("Normal", "normal"),
             ("DDIM", "ddim_uniform")
         ]
-
+        
     lora_choices = get_lora_choices()
     angle_html_path = get_angle_html_path()
+    
     if not os.path.exists(angle_html_path):
         print(f"[Image Edit] 警告: 镜头角度选择器 HTML 文件不存在: {angle_html_path}")
-
+        
     apply_angle_js = """
     async () => {
-        console.log("开始获取角度...");
         const iframe = document.getElementById('camera-angle-iframe');
         if (!iframe || !iframe.contentWindow) {
             alert('错误：无法访问3D视角界面，请刷新页面后重试！');
             return null;
         }
+
         await new Promise(resolve => {
             if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
                 resolve();
@@ -496,53 +466,163 @@ def create_ui():
                 setTimeout(resolve, 1500);
             }
         });
-        console.log("iframe 已加载，发送消息");
+
         iframe.contentWindow.postMessage({ type: 'GET_CURRENT_ANGLE' }, window.location.origin);
+
         return new Promise((resolve) => {
-            const timeoutId = setTimeout(() => {
-                window.removeEventListener('message', handleMessage);
-                alert('错误：等待3D视角界面响应超时！');
-                resolve(null);
-            }, 5000);
+            let timeoutId = null;
+
+            const matchText = (val, rules) => {
+                const v = String(val ?? '').trim().toLowerCase();
+                if (!v) {
+                    return { matched: true, text: '' };
+                }
+
+                for (const r of rules) {
+                    for (const k of r.keys) {
+                        if (v.includes(k)) {
+                            return { matched: true, text: r.text };
+                        }
+                    }
+                }
+
+                return { matched: false, text: '' };
+            };
+
+            const azimuthRules = [
+                { keys: ['front-right', '前右'], text: '将镜头向右旋转45度' },
+                { keys: ['right side', '右侧'], text: '将镜头向右旋转90度' },
+                { keys: ['back-right', '后右'], text: '将镜头向右旋转135度' },
+                { keys: ['back-left', '后左'], text: '将镜头向左旋转135度' },
+                { keys: ['left side', '左侧'], text: '将镜头向左旋转90度' },
+                { keys: ['front-left', '前左'], text: '将镜头向左旋转45度' },
+                { keys: ['back view', 'back', '背面'], text: '将镜头旋转180度' },
+                { keys: ['front view', 'front', '正面'], text: '' }
+            ];
+
+            const elevationRules = [
+                { keys: ['low-angle', 'low', '低角度', '低'], text: '将镜头向下移动' },
+                { keys: ['elevated', '仰拍', '仰'], text: '将镜头向上倾斜' },
+                { keys: ['high-angle', 'high', 'top-down', '俯', '高角度', '高'], text: '将镜头转为俯视' },
+                { keys: ['eye-level', 'eye', '平视'], text: '' }
+            ];
+
+            const distanceRules = [
+                { keys: ['close-up', 'close', '特写'], text: '将镜头转为特写镜头' },
+                { keys: ['medium', '中景'], text: '中景' },
+                { keys: ['wide-angle', 'wide', '远景', '广角'], text: '将镜头转为广角镜头' }
+            ];
+
             const handleMessage = (event) => {
-                if (event.data.type === 'ANGLE_SELECTED') {
-                    clearTimeout(timeoutId);
-                    window.removeEventListener('message', handleMessage);
-                    console.log("收到角度数据:", event.data);
-                    const { azimuth, elevation, distance } = event.data;
+                if (event.data.type !== 'ANGLE_SELECTED') {
+                    return;
+                }
+
+                clearTimeout(timeoutId);
+                window.removeEventListener('message', handleMessage);
+
+                const raw = event.data;
+
+                const azimuth = String(raw.azimuth ?? '').trim();
+                const elevation = String(raw.elevation ?? '').trim();
+                const distance = String(raw.distance ?? '').trim();
+
+                const app = typeof gradioApp === 'function' ? gradioApp() : document;
+
+                let versionText = '';
+                app.querySelectorAll('#angle_model_version input').forEach(inp => {
+                    versionText += (inp.value || '') + ' ';
+                });
+
+                let is2509 = false;
+
+                if (versionText.includes('2509')) {
+                    is2509 = true;
+                } else if (versionText.includes('2511')) {
+                    is2509 = false;
+                } else {
+                    const modelNameEl = app.querySelector('#model_status_box input, #model_status_box textarea');
+                    const modelName = (modelNameEl ? modelNameEl.value : '').toLowerCase();
+                    is2509 = modelName.includes('2509');
+                }
+
+                let anglePrompt = '';
+
+                if (is2509) {
+                    const azRes = matchText(azimuth, azimuthRules);
+                    const elRes = matchText(elevation, elevationRules);
+                    const distRes = matchText(distance, distanceRules);
+
+                    if (!azRes.matched || !elRes.matched || !distRes.matched) {
+                        alert(
+                            '2509 未匹配到角度词。收到：方位=' +
+                            (azimuth || '空') +
+                            '，高程=' +
+                            (elevation || '空') +
+                            '，距离=' +
+                            (distance || '空')
+                        );
+                        resolve(null);
+                        return;
+                    }
+
+                    const parts2509 = [azRes.text, elRes.text, distRes.text].filter(Boolean);
+
+                    if (parts2509.length === 0) {
+                        resolve(null);
+                        return;
+                    }
+
+                    anglePrompt = parts2509.join(' ');
+
+                } else {
                     const parts = [];
-                    if (azimuth != null && azimuth !== "") parts.push(azimuth);
-                    if (elevation != null && elevation !== "") parts.push(elevation);
-                    if (distance != null && distance !== "") parts.push(distance);
+
+                    if (raw.azimuth != null && raw.azimuth !== '') parts.push(raw.azimuth);
+                    if (raw.elevation != null && raw.elevation !== '') parts.push(raw.elevation);
+                    if (raw.distance != null && raw.distance !== '') parts.push(raw.distance);
+
                     if (parts.length === 0) {
                         alert('错误：未能获取到有效的角度数据！');
                         resolve(null);
                         return;
                     }
-                    const anglePrompt = '<sks> ' + parts.join(' ');
-                    const promptContainer = document.getElementById('image_edit_prompt');
-                    if (promptContainer) {
-                        let textarea = promptContainer.querySelector('textarea');
-                        if (!textarea && (promptContainer.tagName === 'TEXTAREA' || promptContainer.tagName === 'INPUT')) {
-                            textarea = promptContainer;
-                        }
-                        if (textarea) {
-                            const newValue = textarea.value ? textarea.value + ' ' + anglePrompt : anglePrompt;
 
-                            textarea.focus();
-                            textarea.value = newValue;
-                            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                            textarea.dispatchEvent(new Event('change', { bubbles: true }));
-                            textarea.blur();
-
-                            resolve(anglePrompt);
-                            return;
-                        }
-                    }
-                    alert('未找到正向提示词输入框！请检查 elem_id 是否为 image_edit_prompt');
-                    resolve(null);
+                    anglePrompt = '<sks> ' + parts.join(' ');
                 }
+
+                const promptContainer = document.getElementById('image_edit_prompt');
+                if (promptContainer) {
+                    let textarea = promptContainer.querySelector('textarea');
+
+                    if (!textarea && (promptContainer.tagName === 'TEXTAREA' || promptContainer.tagName === 'INPUT')) {
+                        textarea = promptContainer;
+                    }
+
+                    if (textarea) {
+                        const newValue = textarea.value ? textarea.value + ' ' + anglePrompt : anglePrompt;
+
+                        textarea.focus();
+                        textarea.value = newValue;
+                        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+                        textarea.blur();
+
+                        resolve(anglePrompt);
+                        return;
+                    }
+                }
+
+                alert('未找到正向提示词输入框！请检查 elem_id 是否为 image_edit_prompt');
+                resolve(null);
             };
+
+            timeoutId = setTimeout(() => {
+                window.removeEventListener('message', handleMessage);
+                alert('错误：等待3D视角界面响应超时！');
+                resolve(null);
+            }, 5000);
+
             window.addEventListener('message', handleMessage);
         });
     }
@@ -553,25 +633,21 @@ def create_ui():
         .angle-iframe-container { width: 100%; height: 350px; border: 1px solid #444; border-radius: 8px; overflow: hidden; }
     """) as ui:
         gr.Markdown("## 🖼️ 图像编辑")
-
         with gr.Tabs():
             with gr.TabItem("图像编辑", id="image_edit_tab"):
                 with gr.Row():
                     with gr.Column(scale=1):
-                        model_status = gr.Textbox(label="模型状态", value=get_current_model_name(), interactive=False, elem_classes="model-status-textbox")
+                        model_status = gr.Textbox(label="模型状态", value=get_current_model_name(), interactive=False, elem_id="model_status_box", elem_classes="model-status-textbox")
                         with gr.Row():
                             force_load_btn = gr.Button("⚡ 加载模型", elem_classes="align-btn")
                             refresh_btn = gr.Button("🔄 卸载模型", elem_classes="align-btn")
                             reset_lora_btn = gr.Button("🔄 重置 LoRA", elem_classes="align-btn")
-
                         with gr.Row():
                             edit_image1 = gr.Image(type="pil", label="参考图像 1", interactive=True, height=300)
                             edit_image2 = gr.Image(type="pil", label="参考图像 2", interactive=True, height=300)
                             edit_image3 = gr.Image(type="pil", label="参考图像 3", interactive=True, height=300)
-
                         prompt = gr.Textbox(label="正向提示词", lines=3, elem_id="image_edit_prompt")
                         neg_prompt = gr.Textbox(label="负向提示词", lines=2)
-
                         with gr.Row():
                             width = gr.Slider(256, 2048, 1024, step=64, label="宽度")
                             height = gr.Slider(256, 2048, 1024, step=64, label="高度")
@@ -583,17 +659,23 @@ def create_ui():
                             scheduler = gr.Dropdown(choices=scheduler_choices, value=scheduler_choices[0][1] if scheduler_choices else "automatic", label="调度器")
                         with gr.Row():
                             seed = gr.Number(-1, label="随机种子", precision=0)
-
                         num_images = gr.Slider(minimum=1, maximum=6, step=1, value=1, label="生成数量（单次多张）")
-
+                        
                         with gr.Accordion("🎥 镜头角度选择器", open=False):
                             if os.path.exists(angle_html_path):
                                 gr.HTML(f'''<div style="width: 100%; height: 350px; border: 1px solid #444; border-radius: 8px; overflow: hidden;"><iframe id="camera-angle-iframe" src="/file={urllib.parse.quote(angle_html_path)}" width="100%" height="100%" style="border: none;"></iframe></div>''')
+                                model_version_dropdown = gr.Dropdown(
+                                    choices=["自动检测 (推荐)", "Qwen-Edit-2511", "Qwen-Edit-2509"],
+                                    value="自动检测 (推荐)",
+                                    label="目标模型版本",
+                                    elem_id="angle_model_version",
+                                    interactive=True
+                                )
                                 angle_apply_btn = gr.Button("应用到正向提示词", variant="secondary", elem_classes="align-btn")
                                 angle_apply_btn.click(None, [], [], _js=apply_angle_js)
                             else:
                                 gr.Markdown(f"⚠️ 镜头角度选择器文件未找到：{angle_html_path}")
-
+                                
                         with gr.Accordion("LoRA 模型快捷选择", open=False):
                             with gr.Row():
                                 lora_dropdown1 = gr.Dropdown(choices=lora_choices, value="无", label="LoRA模型1", interactive=True, scale=3)
@@ -607,7 +689,6 @@ def create_ui():
                             with gr.Row():
                                 lora_refresh_btn = gr.Button("刷新LoRA模型列表", variant="secondary", size="sm")
                                 lora_refresh_btn.click(fn=refresh_lora_models, inputs=[], outputs=[lora_dropdown1, lora_dropdown2, lora_dropdown3])
-
                     with gr.Column(scale=1):
                         output_gallery = gr.Gallery(label="生成结果", columns=2, rows=2, height=400)
                         with gr.Row():
@@ -618,22 +699,19 @@ def create_ui():
                         with gr.Row():
                             clear_btn = gr.Button("🗑️ 清空参考图", variant="secondary", scale=1)
                             open_output_btn = gr.Button("📂 打开输出目录", variant="secondary", scale=1)
-
+                            
                 state = gr.State(value="")
-
-                # 重置 LoRA
+                
                 def reset_lora_selections():
                     return (gr.update(value=""), gr.update(value=""), gr.update(value=""),
                             gr.update(value=1.0), gr.update(value=1.0), gr.update(value=1.0))
                 reset_lora_btn.click(fn=reset_lora_selections, inputs=[], outputs=[lora_dropdown1, lora_dropdown2, lora_dropdown3, lora_weight1, lora_weight2, lora_weight3])
-
+                
                 force_load_btn.click(fn=force_load_model, outputs=[model_status]).then(fn=refresh_display, outputs=[model_status])
                 refresh_btn.click(fn=unload_model, outputs=[model_status])
-
-                # 清空参考图
+                
                 clear_btn.click(fn=lambda: [None, None, None], outputs=[edit_image1, edit_image2, edit_image3])
-
-                # 打开输出目录
+                
                 def open_output_directory():
                     base_dir = opts.outdir_txt2img_samples or opts.outdir_samples or str(OUTPUT_DIR)
                     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -648,14 +726,12 @@ def create_ui():
                         subprocess.Popen(["xdg-open", target_dir])
                     return f"已打开输出目录: {target_dir}"
                 open_output_btn.click(fn=open_output_directory, inputs=[], outputs=[])
-
-                # ---------- 核心生成事件链 ----------
+                
                 def set_status_loading():
                     return gr.update(value="⏳ 生成中...")
-
                 def clear_gallery():
-                    return []   # 清空画廊
-
+                    return []   
+                    
                 generate_btn.click(
                     fn=clear_gallery,
                     inputs=[],
@@ -676,31 +752,25 @@ def create_ui():
                         num_images,
                     ],
                     outputs=[output_gallery, state],
-                    show_progress="full"   # 仅画廊遮罩
+                    show_progress="full"   
                 )
-
-                # 监听 state 变化，独立更新状态框（无遮罩）
+                
                 def update_status_from_state(state_text):
                     return gr.update(value=state_text)
-
                 state.change(
                     fn=update_status_from_state,
                     inputs=[state],
                     outputs=[status],
-                    show_progress="hidden"   # 完全无遮罩
+                    show_progress="hidden"   
                 )
-
-                # 停止按钮
+                
                 stop_btn.click(fn=lambda: shared.state.interrupt(), inputs=[], outputs=[])
-
-                # 清除图像按钮
+                
                 clear_gallery_btn.click(fn=clear_gallery, inputs=[], outputs=[output_gallery])
-                 
-            # ==================== LoRA 管理标签页 ====================
+                
             with gr.TabItem("LoRA", id="lora_manager_tab"):
                 gr.Markdown("### 选择要加载的 LoRA 模型（默认权重为 1.0）")
                 gr.Markdown("勾选一个或多个 LoRA，点击「生成 LoRA 提示词」，将生成的文本发送到正向提示词框中。")
-
                 lora_names = get_lora_names()
                 lora_checkbox_group = gr.CheckboxGroup(
                     choices=lora_names,
@@ -718,13 +788,12 @@ def create_ui():
                 )
                 send_to_prompt_btn = gr.Button("📤 发送到正向提示词", variant="secondary", size="sm")
                 refresh_lora_list_btn = gr.Button("🔄 刷新 LoRA 列表", variant="secondary")
-
+                
                 def refresh_lora_list():
                     names = get_lora_names()
                     return gr.update(choices=names)
-
                 refresh_lora_list_btn.click(fn=refresh_lora_list, inputs=[], outputs=[lora_checkbox_group])
-
+                
                 def make_lora_prompt(selected_loras):
                     if not selected_loras:
                         return "请至少选择一个 LoRA 模型"
@@ -733,9 +802,9 @@ def create_ui():
                         name_without_ext = os.path.splitext(lora_name)[0]
                         prompts.append(f"<lora:{name_without_ext}:1.0>")
                     return " ".join(prompts)
-
+                    
                 generate_lora_prompt_btn.click(fn=make_lora_prompt, inputs=[lora_checkbox_group], outputs=[lora_prompt_output])
-
+                
                 send_to_prompt_js = """
                 async () => {
                     console.log("发送 LoRA 提示词：开始");
@@ -788,11 +857,10 @@ def create_ui():
                 }
                 """
                 send_to_prompt_btn.click(None, [], [], _js=send_to_prompt_js)
-
                 ui.load(fn=refresh_lora_list, outputs=[lora_checkbox_group])
-
+                
         ui.load(fn=refresh_display, outputs=[model_status])
-
+        
     return ui
 
 def on_ui_tabs():
