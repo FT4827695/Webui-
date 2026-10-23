@@ -144,17 +144,52 @@ def force_load_model():
         checkpoint_name = opts.sd_model_checkpoint
         if not checkpoint_name:
             return "错误：请先在设置中选择模型"
+
         print(f"[Image Edit] 目标模型: {checkpoint_name}")
-        
-        from modules import sd_models
-        if hasattr(sd_models, 'model_data'):
-            if hasattr(sd_models.model_data, 'loaded_model'):
-                sd_models.model_data.loaded_model = None
-            if hasattr(sd_models.model_data, 'current_checkpoint'):
-                sd_models.model_data.current_checkpoint = None
-        if hasattr(sd_models, 'checkpoints_loaded'):
-            sd_models.checkpoints_loaded.clear()
-            
+
+        # ==================== 卸载旧模型并清理显存 ====================
+        print("[Image Edit] 预清理：卸载当前模型并释放显存...")
+
+        try:
+            if shared.sd_model is not None and hasattr(shared.sd_model, 'clear_references'):
+                shared.sd_model.clear_references()
+        except Exception as e:
+            print(f"[Image Edit] clear_references 失败: {e}")
+
+        try:
+            from modules import sd_models as sd_models_local
+            if hasattr(sd_models_local, 'unload_model_weights'):
+                sd_models_local.unload_model_weights()
+        except Exception as e:
+            print(f"[Image Edit] unload_model_weights 失败: {e}")
+
+        shared.sd_model = None
+
+        try:
+            from modules import sd_models as sd_models_local
+            if hasattr(sd_models_local, 'model_data'):
+                if hasattr(sd_models_local.model_data, 'loaded_model'):
+                    sd_models_local.model_data.loaded_model = None
+                if hasattr(sd_models_local.model_data, 'current_checkpoint'):
+                    sd_models_local.model_data.current_checkpoint = None
+
+            if hasattr(sd_models_local, 'checkpoints_loaded'):
+                sd_models_local.checkpoints_loaded.clear()
+        except Exception as e:
+            print(f"[Image Edit] 清空模型状态失败: {e}")
+
+        processing.need_global_unload = True
+
+        try:
+            import gc
+            gc.collect()
+            devices.torch_gc()
+        except Exception as e:
+            print(f"[Image Edit] 显存清理失败: {e}")
+
+        print("[Image Edit] 预清理完成，开始加载目标模型...")
+        # ===================================================================
+
         if FORGE_MAIN_ENTRY_AVAILABLE:
             main_entry.refresh_model_loading_parameters(refresh=True)
         else:
@@ -162,38 +197,56 @@ def force_load_model():
             checkpoint_info = select_checkpoint()
             if checkpoint_info is None:
                 return "错误：未找到模型文件"
+
             from modules_forge.presets import forge_unet_storage_dtype_options
             forge_unet_dtype = getattr(opts, 'forge_unet_storage_dtype', None)
-            unet_storage_dtype, lora_fp16 = forge_unet_storage_dtype_options.get(forge_unet_dtype, (None, False))
+            unet_storage_dtype, lora_fp16 = forge_unet_storage_dtype_options.get(
+                forge_unet_dtype,
+                (None, False)
+            )
+
             sd_models.model_data.forge_loading_parameters = dict(
                 checkpoint_info=checkpoint_info,
                 additional_modules=getattr(opts, 'forge_additional_modules', None),
                 unet_storage_dtype=unet_storage_dtype
             )
+
             from backend.args import dynamic_args
             dynamic_args.online_lora = lora_fp16
-            
+
         processing.need_global_unload = True
+
         sd_model, reloaded = sd_models.forge_model_reload()
+
         if sd_model is None:
             print("[Image Edit] ⚠️ forge_model_reload 返回空，尝试使用原生 load_model 兜底...")
             if hasattr(sd_models, 'load_model'):
                 sd_models.load_model()
                 sd_model = shared.sd_model
-                
+
         if sd_model is None:
             return "错误：模型加载失败，请检查模型文件"
-            
+
         shared.sd_model = sd_model
         print(f"[Image Edit] 模型加载成功: {sd_model.__class__.__name__}")
+
         model_name = getattr(sd_model, 'sd_checkpoint_info', None)
         model_name = model_name.model_name if model_name else checkpoint_name
+
+        try:
+            import gc
+            gc.collect()
+            devices.torch_gc()
+        except Exception:
+            pass
+
         return f"成功加载模型: {model_name}"
+
     except Exception as e:
         error_msg = f"❌ 模型加载失败: {str(e)}\n{traceback.format_exc()}"
         print(error_msg)
         return error_msg
-
+        
 def unload_model() -> str:
     if shared.sd_model is None:
         return "模型已经卸载，无需重复操作"
